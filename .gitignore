@@ -1,0 +1,15 @@
+# Secrets - never commit
+wallet.json
+.env
+*.env
+
+# Foundry build output
+/out/
+/cache/
+/broadcast/
+
+# Dependencies
+/node_modules/
+
+# OS
+.DS_Store

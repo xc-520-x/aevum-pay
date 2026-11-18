@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AevumPay - Capped Payment Allowances</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 860px; margin: 0 auto; padding: 24px; color: #1a1a1a; background: #fafafa; }
+  h1 { font-size: 1.6em; margin-bottom: 4px; }
+  .sub { color: #555; margin-bottom: 20px; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 16px 20px; margin: 14px 0; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  label { font-size: 0.85em; color: #555; display: block; margin: 8px 0 2px; }
+  input { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 1em; width: 100%; box-sizing: border-box; }
+  .field { flex: 1 1 160px; }
+  button { background: #1a73e8; color: #fff; border: none; border-radius: 6px; padding: 9px 16px; font-size: 0.95em; cursor: pointer; margin: 6px 4px 6px 0; }
+  button:hover { background: #1557b0; }
+  button.secondary { background: #eee; color: #222; }
+  button.secondary:hover { background: #ddd; }
+  button.danger { background: #c5221f; }
+  button.danger:hover { background: #a50e0e; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .muted { color: #666; font-size: 0.9em; }
+  .addr { font-family: monospace; font-size: 0.85em; word-break: break-all; }
+  .status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; }
+  .status-active { background: #e6f4ea; color: #137333; }
+  .status-revoked { background: #fce8e6; color: #a50e0e; }
+  .status-expired { background: #fef7e0; color: #b06000; }
+  #log { white-space: pre-wrap; font-size: 0.85em; color: #333; background: #f1f3f4; border-radius: 6px; padding: 10px; max-height: 220px; overflow-y: auto; }
+  .banner { background: #fef7e0; border: 1px solid #f9ab00; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+</style>
+</head>
+<body>
+<h1>AevumPay</h1>
+<div class="sub">Capped payment allowances in tUSD8 for AI agents and services. QDay Aevum testnet (chain ID 44005). Test tokens only.</div>
+
+<div id="deployBanner" class="banner" style="display:none">Contract not deployed yet. Set CONTRACT_ADDRESS in the page source after deployment.</div>
+
+<div class="card">
+  <div class="row">
+    <button id="connectBtn" onclick="connectWallet()">Connect wallet</button>
+    <span id="accountInfo" class="muted">Not connected</span>
+  </div>
+  <div class="row">
+    <span class="muted">tUSD8 balance: <b id="tusdbalance">-</b></span>
+    <span class="muted">Contract: <span id="contractAddr" class="addr"></span></span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Create allowance</h3>
+  <div class="row">
+    <div class="field"><label>Spender (agent / service address)</label><input id="fSpender" placeholder="0x..."></div>
+    <div class="field"><label>Per-draw cap (tUSD8)</label><input id="fPerDraw" type="number" min="0" step="any" placeholder="100"></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>Total cap (tUSD8, deposited now)</label><input id="fTotal" type="number" min="0" step="any" placeholder="500"></div>
+    <div class="field"><label>Expiry (days from now)</label><input id="fDays" type="number" min="1" step="1" placeholder="7"></div>
+  </div>
+  <button id="createBtn" onclick="createAllowance()" disabled>Create allowance</button>
+  <span class="muted">The app approves tUSD8 for the contract automatically when needed.</span>
+</div>
+
+<div class="card">
+  <h3>Allowances</h3>
+  <button class="secondary" onclick="loadAllowances()">Refresh</button>
+  <div id="allowanceList"><span class="muted">Connect a wallet to load allowances.</span></div>
+</div>
+
+<div class="card">
+  <h3>Draw history</h3>
+  <div id="historyList"><span class="muted">No draws yet.</span></div>
+</div>
+
+<div class="card">
+  <h3>Activity log</h3>
+  <div id="log"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
+<script>
+const CHAIN_ID = 44005;
+const CHAIN_ID_HEX = "0xABE5";
+const RPC_URL = "https://rpc-test.qday.info";
+const EXPLORER = "https://explorer-test.qday.info";
+const TUSD8 = "0x456569838f1d43009A91ebA4263147Afd7233483";
+// Set to the deployed AevumPay address after deployment.
+const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000";
+const ABI = [{"type":"constructor","inputs":[{"name":"_token","type":"address","internalType":"address"}],"stateMutability":"nonpayable"},{"type":"function","name":"allowances","inputs":[{"name":"","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"owner","type":"address","internalType":"address"},{"name":"spender","type":"address","internalType":"address"},{"name":"perDrawCap","type":"uint256","internalType":"uint256"},{"name":"totalCap","type":"uint256","internalType":"uint256"},{"name":"spent","type":"uint256","internalType":"uint256"},{"name":"expiry","type":"uint256","internalType":"uint256"},{"name":"status","type":"uint8","internalType":"enum AevumPay.Status"}],"stateMutability":"view"},{"type":"function","name":"claimExpired","inputs":[{"name":"id","type":"uint256","internalType":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"createAllowance","inputs":[{"name":"spender","type":"address","internalType":"address"},{"name":"perDrawCap","type":"uint256","internalType":"uint256"},{"name":"totalCap","type":"uint256","internalType":"uint256"},{"name":"expiry","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"id","type":"uint256","internalType":"uint256"}],"stateMutability":"nonpayable"},{"type":"function","name":"draw","inputs":[{"name":"id","type":"uint256","internalType":"uint256"},{"name":"amount","type":"uint256","internalType":"uint256"},{"name":"memo","type":"string","internalType":"string"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"getAllowance","inputs":[{"name":"id","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"","type":"tuple","internalType":"struct AevumPay.Allowance","components":[{"name":"owner","type":"address","internalType":"address"},{"name":"spender","type":"address","internalType":"address"},{"name":"perDrawCap","type":"uint256","internalType":"uint256"},{"name":"totalCap","type":"uint256","internalType":"uint256"},{"name":"spent","type":"uint256","internalType":"uint256"},{"name":"expiry","type":"uint256","internalType":"uint256"},{"name":"status","type":"uint8","internalType":"enum AevumPay.Status"}]}],"stateMutability":"view"},{"type":"function","name":"nextAllowanceId","inputs":[],"outputs":[{"name":"","type":"uint256","internalType":"uint256"}],"stateMutability":"view"},{"type":"function","name":"remaining","inputs":[{"name":"id","type":"uint256","internalType":"uint256"}],"outputs":[{"name":"","type":"uint256","internalType":"uint256"}],"stateMutability":"view"},{"type":"function","name":"revoke","inputs":[{"name":"id","type":"uint256","internalType":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"token","inputs":[],"outputs":[{"name":"","type":"address","internalType":"contract IERC20"}],"stateMutability":"view"},{"type":"function","name":"topUp","inputs":[{"name":"id","type":"uint256","internalType":"uint256"},{"name":"amount","type":"uint256","internalType":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"event","name":"AllowanceCreated","inputs":[{"name":"id","type":"uint256","indexed":true,"internalType":"uint256"},{"name":"owner","type":"address","indexed":true,"internalType":"address"},{"name":"spender","type":"address","indexed":true,"internalType":"address"},{"name":"perDrawCap","type":"uint256","indexed":false,"internalType":"uint256"},{"name":"totalCap","type":"uint256","indexed":false,"internalType":"uint256"},{"name":"expiry","type":"uint256","indexed":false,"internalType":"uint256"}],"anonymous":false},{"type":"event","name":"Drawn","inputs":[{"name":"id","type":"uint256","indexed":true,"internalType":"uint256"},{"name":"spender","type":"address","indexed":true,"internalType":"address"},{"name":"amount","type":"uint256","indexed":false,"internalType":"uint256"},{"name":"memo","type":"string","indexed":false,"internalType":"string"}],"anonymous":false},{"type":"event","name":"ExpiredClaimed","inputs":[{"name":"id","type":"uint256","indexed":true,"internalType":"uint256"},{"name":"refunded","type":"uint256","indexed":false,"internalType":"uint256"}],"anonymous":false},{"type":"event","name":"Revoked","inputs":[{"name":"id","type":"uint256","indexed":true,"internalType":"uint256"},{"name":"refunded","type":"uint256","indexed":false,"internalType":"uint256"}],"anonymous":false},{"type":"event","name":"ToppedUp","inputs":[{"name":"id","type":"uint256","indexed":true,"internalType":"uint256"},{"name":"amount","type":"uint256","indexed":false,"internalType":"uint256"},{"name":"newTotalCap","type":"uint256","indexed":false,"internalType":"uint256"}],"anonymous":false},{"type":"error","name":"ReentrancyGuardReentrantCall","inputs":[]},{"type":"error","name":"SafeERC20FailedOperation","inputs":[{"name":"token","type":"address","internalType":"address"}]}];
+const ERC20_ABI = ["function approve(address spender, uint256 amount) returns (bool)", "function allowance(address owner, address spender) view returns (uint256)", "function balanceOf(address account) view returns (uint256)"];
+
+let provider, signer, contract, token, account;
+
+function log(msg) {
+  const el = document.getElementById("log");
+  el.textContent += new Date().toLocaleTimeString() + "  " + msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+
+function fmt(v) { return ethers.formatUnits(v, 6); }
+function parseAmt(s) { return ethers.parseUnits(s.trim(), 6); }
+function statusName(s) { return ["Active", "Revoked", "Expired"][Number(s)] || "Unknown"; }
+function statusClass(s) { return ["status-active", "status-revoked", "status-expired"][Number(s)] || ""; }
+function short(a) { return a.slice(0, 6) + "..." + a.slice(-4); }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+document.getElementById("contractAddr").textContent = CONTRACT_ADDRESS;
+if (CONTRACT_ADDRESS === "0x0000000000000000000000000000000000000000") {
+  document.getElementById("deployBanner").style.display = "block";
+}
+
+async function connectWallet() {
+  if (!window.ethereum) { alert("No wallet found. Install MetaMask first."); return; }
+  try {
+    provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    const net = await provider.getNetwork();
+    if (Number(net.chainId) !== CHAIN_ID) {
+      try {
+        await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN_ID_HEX }] });
+      } catch (e) {
+        if (e.code === 4902) {
+          await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{
+            chainId: CHAIN_ID_HEX, chainName: "QDay Aevum Testnet",
+            nativeCurrency: { name: "tQDAY", symbol: "tQDAY", decimals: 18 },
+            rpcUrls: [RPC_URL], blockExplorerUrls: [EXPLORER]
+          }] });
+        } else { throw e; }
+      }
+      provider = new ethers.BrowserProvider(window.ethereum);
+    }
+    signer = await provider.getSigner();
+    account = await signer.getAddress();
+    contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+    token = new ethers.Contract(TUSD8, ERC20_ABI, signer);
+    document.getElementById("accountInfo").textContent = "Connected: " + account;
+    document.getElementById("createBtn").disabled = false;
+    const bal = await token.balanceOf(account);
+    document.getElementById("tusdbalance").textContent = fmt(bal) + " tUSD8";
+    log("Connected as " + account);
+    await loadAllowances();
+    await loadHistory();
+  } catch (e) {
+    log("Connect failed: " + (e.reason || e.message));
+  }
+}
+
+async function ensureApproval(amount) {
+  const cur = await token.allowance(account, CONTRACT_ADDRESS);
+  if (cur >= amount) return;
+  log("Approving tUSD8 spend (" + fmt(amount) + ")...");
+  const tx = await token.approve(CONTRACT_ADDRESS, amount);
+  await tx.wait();
+  log("Approval confirmed: " + tx.hash);
+}
+
+async function createAllowance() {
+  try {
+    const spender = document.getElementById("fSpender").value.trim();
+    const perDraw = parseAmt(document.getElementById("fPerDraw").value);
+    const total = parseAmt(document.getElementById("fTotal").value);
+    const days = parseInt(document.getElementById("fDays").value, 10);
+    if (!ethers.isAddress(spender)) { alert("Spender is not a valid address."); return; }
+    if (perDraw <= 0n || total < perDraw || !days || days < 1) { alert("Check the caps and expiry days."); return; }
+    const expiry = BigInt(Math.floor(Date.now() / 1000) + days * 86400);
+    await ensureApproval(total);
+    log("Creating allowance...");
+    const tx = await contract.createAllowance(spender, perDraw, total, expiry);
+    const rc = await tx.wait();
+    log("Allowance created: " + tx.hash);
+    await loadAllowances();
+  } catch (e) {
+    log("Create failed: " + (e.reason || e.message));
+  }
+}
+
+async function loadAllowances() {
+  if (!contract) return;
+  try {
+    const n = await contract.nextAllowanceId();
+    const list = document.getElementById("allowanceList");
+    if (Number(n) === 0) { list.innerHTML = "<span class='muted'>No allowances yet.</span>"; return; }
+    let html = "";
+    for (let i = 0; i < Number(n); i++) {
+      const a = await contract.getAllowance(i);
+      const rem = await contract.remaining(i);
+      const exp = new Date(Number(a.expiry) * 1000).toLocaleString();
+      const isOwner = account && a.owner.toLowerCase() === account.toLowerCase();
+      const isSpender = account && a.spender.toLowerCase() === account.toLowerCase();
+      const active = Number(a.status) === 0;
+      html += '<div class="card"><div class="row"><b>#' + i + '</b> '
+        + '<span class="status ' + statusClass(a.status) + '">' + statusName(a.status) + '</span></div>'
+        + '<table><tr><td>Owner</td><td class="addr">' + esc(a.owner) + '</td></tr>'
+        + '<tr><td>Spender</td><td class="addr">' + esc(a.spender) + '</td></tr>'
+        + '<tr><td>Per-draw cap</td><td>' + fmt(a.perDrawCap) + ' tUSD8</td></tr>'
+        + '<tr><td>Total cap</td><td>' + fmt(a.totalCap) + ' tUSD8</td></tr>'
+        + '<tr><td>Spent</td><td>' + fmt(a.spent) + ' tUSD8</td></tr>'
+        + '<tr><td>Remaining</td><td>' + fmt(rem) + ' tUSD8</td></tr>'
+        + '<tr><td>Expiry</td><td>' + esc(exp) + '</td></tr></table>';
+      if (active && isSpender) {
+        html += '<div class="row"><div class="field"><input id="drawAmt' + i + '" type="number" min="0" step="any" placeholder="Amount tUSD8"></div>'
+          + '<div class="field"><input id="drawMemo' + i + '" placeholder="Memo, e.g. task 1 complete"></div></div>'
+          + '<button onclick="drawAllowance(' + i + ')">Draw</button>';
+      }
+      if (active && isOwner) {
+        html += '<div class="row"><div class="field"><input id="topAmt' + i + '" type="number" min="0" step="any" placeholder="Top-up amount tUSD8"></div></div>'
+          + '<button class="secondary" onclick="topUpAllowance(' + i + ')">Top up</button>'
+          + '<button class="danger" onclick="revokeAllowance(' + i + ')">Revoke + refund</button>';
+      }
+      if (active && isOwner && Date.now() / 1000 >= Number(a.expiry)) {
+        html += '<button class="secondary" onclick="claimExpiredAllowance(' + i + ')">Claim expired remainder</button>';
+      }
+      html += '</div>';
+    }
+    list.innerHTML = html;
+  } catch (e) {
+    log("Load failed: " + (e.reason || e.message));
+  }
+}
+
+async function drawAllowance(id) {
+  try {
+    const amount = parseAmt(document.getElementById("drawAmt" + id).value);
+    const memo = document.getElementById("drawMemo" + id).value || "";
+    if (amount <= 0n) { alert("Enter an amount."); return; }
+    log("Drawing " + fmt(amount) + " tUSD8 from #" + id + "...");
+    const tx = await contract.draw(id, amount, memo);
+    await tx.wait();
+    log("Draw confirmed: " + tx.hash);
+    await loadAllowances();
+    await loadHistory();
+  } catch (e) {
+    log("Draw failed: " + (e.reason || e.message));
+  }
+}
+
+async function topUpAllowance(id) {
+  try {
+    const amount = parseAmt(document.getElementById("topAmt" + id).value);
+    if (amount <= 0n) { alert("Enter an amount."); return; }
+    await ensureApproval(amount);
+    log("Topping up #" + id + " by " + fmt(amount) + "...");
+    const tx = await contract.topUp(id, amount);
+    await tx.wait();
+    log("Top-up confirmed: " + tx.hash);
+    await loadAllowances();
+  } catch (e) {
+    log("Top-up failed: " + (e.reason || e.message));
+  }
+}
+
+async function revokeAllowance(id) {
+  try {
+    if (!confirm("Revoke allowance #" + id + " and refund the remainder to you?")) return;
+    log("Revoking #" + id + "...");
+    const tx = await contract.revoke(id);
+    await tx.wait();
+    log("Revoked: " + tx.hash);
+    await loadAllowances();
+  } catch (e) {
+    log("Revoke failed: " + (e.reason || e.message));
+  }
+}
+
+async function claimExpiredAllowance(id) {
+  try {
+    log("Claiming expired remainder of #" + id + "...");
+    const tx = await contract.claimExpired(id);
+    await tx.wait();
+    log("Claimed: " + tx.hash);
+    await loadAllowances();
+  } catch (e) {
+    log("Claim failed: " + (e.reason || e.message));
+  }
+}
+
+async function loadHistory() {
+  if (!contract) return;
+  try {
+    const latest = await provider.getBlockNumber();
+    const from = Math.max(0, latest - 100000);
+    const events = await contract.queryFilter(contract.filters.Drawn(), from, "latest");
+    const el = document.getElementById("historyList");
+    if (events.length === 0) { el.innerHTML = "<span class='muted'>No draws in the last 100,000 blocks.</span>"; return; }
+    let html = "<table><tr><th>Allowance</th><th>Spender</th><th>Amount</th><th>Memo</th><th>Tx</th></tr>";
+    for (const ev of events.slice().reverse()) {
+      html += "<tr><td>#" + ev.args.id + "</td><td class='addr'>" + esc(short(ev.args.spender)) + "</td>"
+        + "<td>" + fmt(ev.args.amount) + "</td><td>" + esc(ev.args.memo) + "</td>"
+        + "<td><a target='_blank' href='" + EXPLORER + "/tx/" + ev.transactionHash + "'>" + esc(short(ev.transactionHash)) + "</a></td></tr>";
+    }
+    el.innerHTML = html + "</table>";
+  } catch (e) {
+    log("History failed: " + (e.reason || e.message));
+  }
+}
+</script>
+</body>
+</html>
