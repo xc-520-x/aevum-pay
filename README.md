@@ -25,7 +25,8 @@ funds involved. Everything runs on the Aevum testnet with test tokens.
 
 ## Contracts (Aevum testnet, chain ID 44005)
 
-- AevumPay: TBD (address and explorer link after deployment)
+- AevumPay: 0x2534C5d9D9429322CFb339C8D06D11bc273cB5C0 (https://explorer-test.qday.info/address/0x2534C5d9D9429322CFb339C8D06D11bc273cB5C0)
+- Deployment tx: 0xf20ece1d4052517df6316c062ce9f85858d252db1d208e2ace8a33b15b080e1b (block 3550502, 2026-11-19)
 - tUSD8: 0x456569838f1d43009A91ebA4263147Afd7233483
 
 ## Architecture
@@ -45,7 +46,7 @@ Prerequisites: Foundry (forge, cast), a wallet with tQDAY from faucet.qday.info.
 3. Deploy to Aevum testnet (needs PRIVATE_KEY with tQDAY for gas):
    forge script script/Deploy.s.sol --rpc-url https://rpc-test.qday.info --broadcast
 4. Open app/index.html in a browser, connect MetaMask, switch to the Aevum testnet
-   (chain ID 44005), and use the app. Set the contract address in the app after deployment.
+   (chain ID 44005), and use the app. The deployed contract address is already set in app/index.html.
 
 ## Demo flow
 
